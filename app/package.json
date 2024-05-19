@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "atlas-app-services-cli": "^1.5.0"
+  }
+}
