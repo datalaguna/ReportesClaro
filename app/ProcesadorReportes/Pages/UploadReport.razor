@@ -1,0 +1,153 @@
+@page "/uploadReport"
+@using System.IO
+@using MongoDB.Driver;
+@using MongoDB.Bson;
+@using System.Collections
+@using ClosedXML.Excel;
+
+<PageTitle>Carga de Reportes Claro</PageTitle>
+
+<h1>Cargado de Reportes</h1>
+
+<p>Seleccione los archivos para cargar</p>
+
+<InputFile OnChange="@LoadFiles" multiple />
+
+@if (ToUploadFiles == null)
+{
+    <p>Esperando carga de reportes</p>
+    <p>Advertencia: Solo documentos en formato Excel</p>
+}
+else
+{
+    <table class="table">
+    <thead>
+        <tr>
+            <th>Direccion de archivo</th>
+            <th>Tamaño</th>
+
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var archivo in ToUploadFiles)
+            {
+                <tr>
+                    <td>@archivo.Name</td>
+                    <td>@archivo.Size</td>
+
+                </tr>
+            }
+        </tbody>
+    </table>
+    <p>Esta seguro con los archivos seleccionados?</p>
+    <button @onclick=@ConfirmarArchivos>Continuar</button>
+    <button @onclick=@CancelarArchivos>Cancelar</button>
+    @if (progresoActual != string.Empty)
+    {
+        <p>Progreso @progresoActual</p>
+        <progress></progress>
+    }
+}
+
+@code {
+    private IReadOnlyList<IBrowserFile>? ToUploadFiles;
+    private string progresoActual = string.Empty;
+    private void LoadFiles(InputFileChangeEventArgs e)
+    {
+        ToUploadFiles = e.GetMultipleFiles();
+    }
+
+    private void CancelarArchivos()
+    {
+        ToUploadFiles = null;
+        progresoActual = string.Empty;
+    }
+
+    private Expenses[]? expenses;
+
+    private async Task ConfirmarArchivos()
+    {
+        var listExpenses = new List<Expenses>();
+
+        foreach (var file in ToUploadFiles)
+        {
+            using (var ms = new MemoryStream())
+            {
+                progresoActual = string.Format("Inicializando archivo: {0}, esto puede tomar un momento, por favor espere", file.Name);
+                await file.OpenReadStream(file.Size).CopyToAsync(ms);
+
+                progresoActual = string.Format("Leyendo archivo: {0}", file.Name);
+                using (var workbook = new ClosedXML.Excel.XLWorkbook(ms))
+                {
+                    foreach (IXLWorksheet wsSelected in workbook.Worksheets)
+                    {
+                        progresoActual = string.Format("Leyendo archivo: {0} - Pagina {1}", file.Name, wsSelected.Name);
+
+                        string cliente = "";
+
+                        for (int rowIndex = 58; wsSelected.RowCount() > rowIndex; rowIndex++)
+                        {
+                            var cell = wsSelected.Row(rowIndex).Cell("D").Value;
+
+                            if (cell.IsText)
+                            {
+                                if (string.IsNullOrEmpty(cell.GetText()))
+                                    break;
+
+
+                                progresoActual = string.Format("Leyendo archivo: {0} - Pagina {1} - Fila {2}: {3}", file.Name, wsSelected.Name,
+                                rowIndex, cell.GetText());
+
+                                if (cell.GetText().StartsWith("CLARO"))
+                                {
+                                    cliente = cell.GetText();
+                                }
+                                else
+                                {
+                                    listExpenses.Add(new Expenses()
+                                        {
+                                            client = cliente,
+                                           
+                                            dateRegistered = wsSelected.Row(rowIndex).Cell("E").Value.ToString(),
+
+                                            detail = new Detail()
+                                            {
+                                                reference = wsSelected.Row(rowIndex).Cell("D").Value.ToString(),
+                                                detail = wsSelected.Row(rowIndex).Cell("J").Value.ToString(),
+                                                total = wsSelected.Row(rowIndex).Cell("AY").Value.ToString()
+                                            }
+                                        });
+
+                                    Console.WriteLine(listExpenses[listExpenses.Count-1].toString());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        expenses = listExpenses.ToArray();
+    }
+
+    private class Expenses
+    {
+        public string client;
+        public string dateRegistered;
+
+        public Detail detail;
+
+        public string toString()
+        {
+            return string.Format("{0} - {1} - {2} - {3} - {4}", client, dateRegistered.ToString(), detail.reference, detail.detail,
+            detail.total.ToString());
+        }
+
+    }
+
+    public class Detail
+    {
+        public string reference;
+        public string detail;
+        public string total;
+    }
+}
